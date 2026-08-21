@@ -1,6 +1,6 @@
 {
   "name": "@eventra_dev/cli-plugin-astro",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Eventra CLI plugin — extract track() calls from Astro (.astro) files",
   "license": "MIT",
   "type": "commonjs",

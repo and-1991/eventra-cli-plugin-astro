@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm version" src="https://img.shields.io/npm/v/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
-  <img alt="tests passing" src="https://img.shields.io/badge/tests-20%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
+  <img alt="tests passing" src="https://img.shields.io/badge/tests-21%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="coverage" src="https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="node" src="https://img.shields.io/node/v/@eventra_dev/cli-plugin-astro?style=flat-square&color=darkgreen&logo=node.js&logoColor=white">
   <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ready-blue?style=flat-square&logo=typescript&logoColor=white"></a>
@@ -120,14 +120,14 @@ No dependency on `@eventra_dev/eventra-cli` — the CLI adapts this shape intern
 
 **100% statement/branch/function/line coverage** (v8 provider, `pnpm test:coverage`), enforced via a `coverage.thresholds` block in `vitest.config.ts`.
 
-**20 unit tests** (vitest), covering:
+**21 unit tests** (vitest), covering:
 
 | Area | Covers |
 |---|---|
 | Component parsing | Frontmatter extraction, comment safety, compiler-diagnostic reporting |
 | Template — literal | Nested elements, JSX expressions (`&&`, ternary, `.map()`) |
 | Template — dynamic | Raw expression passthrough, `{event}` shorthand, resolution through the frontmatter scope |
-| Edge cases | Empty `event=""`, boolean-shorthand `event`, empty `event={}`, interpolated `` event=`a-${b}` `` |
+| Edge cases | Empty `event=""`, boolean-shorthand `event`, empty `event={}`, unbraced template-literal `` event=`a-${b}` `` (unsupported — silently ignored, same as any other interpolated/mixed value; wrap it in braces, `` event={`a-${b}`} ``, to make it a supported dynamic expression) |
 | Astro globals | `Astro.props` destructuring passes through without special-casing |
 | Virtual module output | Single combined `.astro.ts`, export stub when frontmatter/template are empty |
 | Plugin contract | `match()`, `includeGlobs`, `staticSinks`, `transform()` |

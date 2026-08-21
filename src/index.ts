@@ -4,7 +4,7 @@ import type { CliPluginAstro } from "./types";
 export function createCliPluginAstro(): CliPluginAstro {
   return {
     id: "astro",
-    version: "1.0.0",
+    version: "1.0.1",
     includeGlobs: ["**/*.astro"],
     staticSinks: [
       {
