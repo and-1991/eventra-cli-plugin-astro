@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import pkg from "../package.json";
 import { createCliPluginAstro } from "../src/index";
 import { buildScriptModule, parseAstroSfc, scriptVirtualPath } from "../src/parse-astro-sfc";
 
@@ -201,6 +202,7 @@ describe("createCliPluginAstro", () => {
     expect(plugin.match("Card.astro")).toBe(true);
     expect(plugin.match("Card.tsx")).toBe(false);
     expect(plugin.includeGlobs).toContain("**/*.astro");
+    expect(plugin.version).toBe(pkg.version);
     expect(plugin.staticSinks?.[0]?.callee).toBe("__eventra_astro_template_event__");
 
     const result = await plugin.transform({ path: "/project/Checkout.astro", source });

@@ -1,10 +1,11 @@
+import pkg from "../package.json";
 import { transformAstroSfc } from "./transform";
 import type { CliPluginAstro } from "./types";
 
 export function createCliPluginAstro(): CliPluginAstro {
   return {
     id: "astro",
-    version: "1.0.1",
+    version: pkg.version,
     includeGlobs: ["**/*.astro"],
     staticSinks: [
       {
