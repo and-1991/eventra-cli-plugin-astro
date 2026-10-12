@@ -1,4 +1,5 @@
 import { parse } from "@astrojs/compiler";
+import { firstContentLine, placeBlocks } from "./layout";
 
 /** A single `event="..."` binding found on a tag in the template. */
 export interface TemplateEventBinding {
@@ -10,6 +11,8 @@ export interface TemplateEventBinding {
 export interface ParsedAstroSfc {
   /** Raw frontmatter (`--- ... ---`) content, or `null` when the file has none. */
   readonly script: string | null;
+  /** 1-based line of the frontmatter's first character in the .astro file. */
+  readonly scriptStartLine?: number;
   readonly templateEvents: readonly TemplateEventBinding[];
   readonly errors: readonly string[];
 }
@@ -72,6 +75,7 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
     .map((diagnostic) => diagnostic.text);
 
   let script: string | null = null;
+  let scriptStartLine: number | undefined;
   const templateEvents: TemplateEventBinding[] = [];
 
   function visit(node: unknown): void {
@@ -83,8 +87,17 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
 
     const record = node as Record<string, unknown>;
     if (record.type === "frontmatter") {
-      const content = (record.value as string).trim();
-      if (content) script = content;
+      const raw = record.value as string;
+      const content = raw.trim();
+      if (content) {
+        script = content;
+        // the node starts at the opening `---`; its text begins on that same line
+        const start = (record.position as { start?: { line?: number } } | undefined)?.start?.line;
+        // `parse(..., { position: true })` always sets it; kept defensive so an
+        // unexpected AST shape only loses line numbers instead of failing the scan
+        /* v8 ignore else */
+        if (typeof start === "number") scriptStartLine = firstContentLine(raw, start);
+      }
       return;
     }
     if (Array.isArray(record.attributes)) {
@@ -97,7 +110,7 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
 
   visit(result.ast);
 
-  return { script, templateEvents, errors };
+  return { script, scriptStartLine, templateEvents, errors };
 }
 
 /** Map `Card.astro` → `Card.astro.ts` (single virtual TS module for the compiler). */
@@ -119,7 +132,10 @@ const TEMPLATE_EVENT_CALLEE = "__eventra_astro_template_event__";
  * rather than silently dropped.
  */
 export function buildScriptModule(parsed: ParsedAstroSfc): string {
-  const parts: string[] = [parsed.script ? ["// --- astro frontmatter ---", parsed.script].join("\n") : "export {}"];
+  // the frontmatter keeps its original line numbers
+  const parts: string[] = [
+    parsed.script ? placeBlocks([{ content: parsed.script, startLine: parsed.scriptStartLine }]) : "export {}",
+  ];
 
   if (parsed.templateEvents.length > 0) {
     const lines = [
