@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm version" src="https://img.shields.io/npm/v/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
-  <img alt="tests passing" src="https://img.shields.io/badge/tests-27%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
+  <img alt="tests passing" src="https://img.shields.io/badge/tests-43%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="coverage" src="https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="node" src="https://img.shields.io/node/v/@eventra_dev/cli-plugin-astro?style=flat-square&color=darkgreen&logo=node.js&logoColor=white">
   <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ready-blue?style=flat-square&logo=typescript&logoColor=white"></a>
@@ -84,6 +84,12 @@ The expression is copied as-is into the same module scope as the frontmatter. If
 
 ---
 
+### Template - expressions and `<script>` tags
+
+Calls written in template expressions are read: `{track("x")}`, `attr={expr}` (`onclick={() => track("x")}`) and `{...spread}`. A `{...}` that also contains markup (`{items.map((i) => <li>...</li>)}`) is JSX, not plain code: only the braces inside it are read.
+
+Each `<script>` in the template (client-side TypeScript) is read as a module of its own, with its own imports and its real line numbers. A script that holds data (`type="application/ld+json"`, an import map) or has no content is skipped. A quoted `onclick="track('x')"` is text for the browser and is not read.
+
 ## Configuration
 
 No plugin-specific config — it activates purely by being listed in `eventra.json`'s `plugins` array (see [Installation](#installation)).
@@ -105,7 +111,7 @@ export interface CliPluginAstro {
 }
 ```
 
-No dependency on `@eventra_dev/eventra-cli` — the CLI adapts this shape internally. `.astro` → one virtual `.astro.ts` module (frontmatter content, then a function wrapping synthetic calls for every template `event="..."` binding). `staticSinks` describes those synthetic calls; the CLI builds its own sink detector from them. See [`@eventra_dev/eventra-cli`'s plugin docs](https://www.npmjs.com/package/@eventra_dev/eventra-cli#plugin-contract-for-authors) for the full external-plugin contract.
+No dependency on `@eventra_dev/eventra-cli` - the CLI adapts this shape internally. `.astro` → one virtual `.astro.ts` module (frontmatter content, then a function wrapping synthetic calls for every template `event="..."` binding and the template expressions copied as code, under a `// --- astro template (auto-generated) ---` comment the CLI uses to tell generated code from your own lines), plus one `.astro.client1.ts`, `.astro.client2.ts`, ... module per template `<script>`. The package also exports `buildClientScriptModule`, `clientScriptVirtualPath` and the `ClientScript` type for those modules. A template-literal attribute (`` attr=`x${track()}` ``) is not read. `staticSinks` describes those synthetic calls; the CLI builds its own sink detector from them. See [`@eventra_dev/eventra-cli`'s plugin docs](https://www.npmjs.com/package/@eventra_dev/eventra-cli#plugin-contract-for-authors) for the full external-plugin contract.
 
 ---
 
@@ -120,7 +126,7 @@ No dependency on `@eventra_dev/eventra-cli` — the CLI adapts this shape intern
 
 **100% statement/branch/function/line coverage** (v8 provider, `pnpm test:coverage`), enforced via a `coverage.thresholds` block in `vitest.config.ts`.
 
-**27 unit tests** (vitest), covering:
+**43 unit tests** (vitest), covering:
 
 | Area | Covers |
 |---|---|

@@ -8,12 +8,27 @@ export interface TemplateEventBinding {
   readonly value: string;
 }
 
+/** A `<script>` element of the template: client-side TypeScript with its own imports and scope. */
+export interface ClientScript {
+  readonly content: string;
+  /** 1-based line of the script's first character in the .astro file. */
+  readonly startLine?: number;
+}
+
 export interface ParsedAstroSfc {
   /** Raw frontmatter (`--- ... ---`) content, or `null` when the file has none. */
   readonly script: string | null;
   /** 1-based line of the frontmatter's first character in the .astro file. */
   readonly scriptStartLine?: number;
   readonly templateEvents: readonly TemplateEventBinding[];
+  /**
+   * Raw JS of the template's own expressions, copied verbatim: `{expr}` interpolations that hold only
+   * code, and attribute values written as `attr={expr}` / `{...spread}`. A call to a tracking function
+   * in there is an event the component fires.
+   */
+  readonly templateCode: readonly string[];
+  /** The template's `<script>` elements, each a module of its own. */
+  readonly clientScripts: readonly ClientScript[];
   readonly errors: readonly string[];
 }
 
@@ -36,8 +51,22 @@ interface AstroAttributeNode {
  * node type names) means new tag kinds a future Astro version adds are
  * picked up automatically.
  */
-function collectFromAttributes(attributes: readonly AstroAttributeNode[], out: TemplateEventBinding[]): void {
+function collectFromAttributes(
+  attributes: readonly AstroAttributeNode[],
+  out: TemplateEventBinding[],
+  code: string[],
+): void {
   for (const attribute of attributes) {
+    // `onclick={() => track("x")}`, `class={cls()}`: plain JS
+    if (attribute.type === "attribute" && attribute.name !== "event" && attribute.kind === "expression") {
+      code.push(attribute.value.trim());
+      continue;
+    }
+    // `{...props()}`: the compiler hands the expression back as the attribute's name, with no value
+    if (attribute.type === "attribute" && attribute.kind === "spread") {
+      code.push(attribute.name.trim());
+      continue;
+    }
     if (attribute.type !== "attribute" || attribute.name !== "event") continue;
 
     if (attribute.kind === "expression") {
@@ -66,6 +95,26 @@ function collectFromAttributes(attributes: readonly AstroAttributeNode[], out: T
   }
 }
 
+// a script that is not JavaScript (`application/ld+json`, an importmap) holds data, not calls
+const JS_SCRIPT_TYPES = new Set(["module", "text/javascript", "application/javascript"]);
+
+function clientScript(element: Record<string, unknown>): ClientScript | null {
+  // an element node always carries its (possibly empty) attributes array
+  const attributes = element.attributes as readonly AstroAttributeNode[];
+  const type = attributes.find((attribute) => attribute.name === "type")?.value.trim().toLowerCase();
+  if (type !== undefined && !JS_SCRIPT_TYPES.has(type)) return null;
+
+  const text = (element.children as readonly { type: string; value: string; position?: { start?: { line?: number } } }[] | undefined)?.find(
+    (child) => child.type === "text",
+  );
+  const content = text?.value.trim();
+  if (!text || !content) return null;
+  const start = text.position?.start?.line;
+  // `position: true` always sets it; kept defensive so an unexpected AST shape only loses line numbers
+  /* v8 ignore next */
+  return { content, startLine: typeof start === "number" ? firstContentLine(text.value, start) : undefined };
+}
+
 /** Parse an Astro component via the real `@astrojs/compiler` parser (handles comments, JSX expressions, malformed markup, etc). */
 export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
   const result = await parse(source, { position: true });
@@ -77,6 +126,8 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
   let script: string | null = null;
   let scriptStartLine: number | undefined;
   const templateEvents: TemplateEventBinding[] = [];
+  const templateCode: string[] = [];
+  const clientScripts: ClientScript[] = [];
 
   function visit(node: unknown): void {
     if (!node || typeof node !== "object") return;
@@ -100,8 +151,22 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
       }
       return;
     }
+    if (record.type === "element" && record.name === "script") {
+      const script = clientScript(record);
+      if (script) clientScripts.push(script);
+      return;
+    }
+    // `{expr}`: when it holds only text it is plain code; one that also holds markup
+    // (`{items.map((i) => <li>...</li>)}`) is JSX, which is not code here, but the `{}` inside it are visited
+    if (record.type === "expression") {
+      const children = record.children as readonly { type: string; value?: string }[] | undefined;
+      if (children?.length && children.every((child) => child.type === "text")) {
+        const expression = children.map((child) => child.value).join("").trim();
+        if (expression) templateCode.push(expression);
+      }
+    }
     if (Array.isArray(record.attributes)) {
-      collectFromAttributes(record.attributes as AstroAttributeNode[], templateEvents);
+      collectFromAttributes(record.attributes as AstroAttributeNode[], templateEvents, templateCode);
     }
     for (const key of Object.keys(record)) {
       visit(record[key]);
@@ -110,12 +175,22 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
 
   visit(result.ast);
 
-  return { script, scriptStartLine, templateEvents, errors };
+  return { script, scriptStartLine, templateEvents, templateCode: templateCode.filter(Boolean), clientScripts, errors };
 }
 
 /** Map `Card.astro` → `Card.astro.ts` (single virtual TS module for the compiler). */
 export function scriptVirtualPath(astroPath: string): string {
   return astroPath.replace(/\.astro$/i, ".astro.ts");
+}
+
+/** Map `Card.astro` → `Card.astro.client1.ts`, `Card.astro.client2.ts`, ... (one module per `<script>`). */
+export function clientScriptVirtualPath(astroPath: string, index: number): string {
+  return astroPath.replace(/\.astro$/i, `.astro.client${index + 1}.ts`);
+}
+
+/** A `<script>` as a module of its own: it has its own imports, so it must not share a scope with the frontmatter. */
+export function buildClientScriptModule(script: ClientScript): string {
+  return `${placeBlocks([script])}\nexport {}\n`;
 }
 
 const TEMPLATE_EVENT_CALLEE = "__eventra_astro_template_event__";
@@ -137,11 +212,14 @@ export function buildScriptModule(parsed: ParsedAstroSfc): string {
     parsed.script ? placeBlocks([{ content: parsed.script, startLine: parsed.scriptStartLine }]) : "export {}",
   ];
 
-  if (parsed.templateEvents.length > 0) {
+  if (parsed.templateEvents.length > 0 || parsed.templateCode.length > 0) {
     const lines = [
       "// --- astro template (auto-generated) ---",
       `declare function ${TEMPLATE_EVENT_CALLEE}(name: string): void;`,
       "function __eventraAstroTemplate() {",
+      // template expressions go through the same detection as frontmatter code; the closing paren
+      // sits on its own line, so a trailing `// comment` cannot swallow it
+      ...parsed.templateCode.map((expression) => `  (${expression}\n  );`),
       ...parsed.templateEvents.map((binding) =>
         binding.kind === "literal"
           ? `  ${TEMPLATE_EVENT_CALLEE}("${escapeString(binding.value)}");`

@@ -16,3 +16,18 @@ describe("transformAstroSfc", () => {
     ).rejects.toThrow(/Failed to parse Astro component .*Broken\.astro/);
   });
 });
+
+describe("transformAstroSfc client scripts", () => {
+  it("returns one extra module per <script>", async () => {
+    const result = await transformAstroSfc({
+      path: "/project/Card.astro",
+      source: `---\n---\n<button>x</button>\n<script>\n  track("a");\n</script>\n<script>track("b");</script>`,
+    });
+    expect(result.modules.map((m) => m.path)).toEqual([
+      "/project/Card.astro.ts",
+      "/project/Card.astro.client1.ts",
+      "/project/Card.astro.client2.ts",
+    ]);
+    expect(result.modules[1]?.content).toContain('track("a");');
+  });
+});

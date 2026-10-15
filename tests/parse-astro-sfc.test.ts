@@ -5,7 +5,13 @@ import { describe, expect, it } from "vitest";
 
 import pkg from "../package.json";
 import { createCliPluginAstro } from "../src/index";
-import { buildScriptModule, parseAstroSfc, scriptVirtualPath } from "../src/parse-astro-sfc";
+import {
+  buildClientScriptModule,
+  buildScriptModule,
+  clientScriptVirtualPath,
+  parseAstroSfc,
+  scriptVirtualPath,
+} from "../src/parse-astro-sfc";
 
 const FIXTURE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -234,5 +240,63 @@ describe("event names with spaces and colons", () => {
     const module = buildScriptModule(parsed);
     expect(module).toContain('__eventra_astro_template_event__("App: User Sign Up");');
     expect(module).toContain('__eventra_astro_template_event__("Say \\"Hi\\" Now");');
+  });
+});
+
+describe("template code and client scripts", () => {
+  const parse = (template: string) => parseAstroSfc(`---\nimport { t } from "./t";\n---\n${template}`);
+
+  it("collects `{expr}` interpolations that hold only code", async () => {
+    expect((await parse(`<p>{t("a")}</p><span>{ t("b") }</span>`)).templateCode).toEqual(['t("a")', 't("b")']);
+  });
+
+  it("collects attr={expr} values and {...spread}, but not the event= binding or quoted strings", async () => {
+    const parsed = await parse(`<a data-x={t("c")} onclick={() => t("d")} {...t("e")} event={name} title="x()" onfocus="t('s')">x</a>`);
+    expect(parsed.templateCode).toEqual(['t("c")', '() => t("d")', 't("e")']);
+    expect(parsed.templateEvents).toEqual([{ kind: "dynamic", value: "name" }]);
+  });
+
+  it("reads the code in the braces nested in markup, not the surrounding JSX", async () => {
+    const parsed = await parse(`<ul>{items.map((i) => <li>{t("m")}</li>)}</ul>`);
+    expect(parsed.templateCode).toEqual(['t("m")']);
+  });
+
+  it("skips empty braces", async () => {
+    expect((await parse(`<p>{}</p><p>{ }</p>`)).templateCode).toEqual([]);
+  });
+
+  it("collects each <script> with the line it starts on, and ignores data scripts and empty ones", async () => {
+    const parsed = await parse(
+      [
+        `<script>`,
+        `  import { t } from "./t";`,
+        `  t("one");`,
+        `</script>`,
+        `<script type="module">t("two");</script>`,
+        `<script type="application/ld+json">{"@type":"Thing"}</script>`,
+        `<script type="importmap">{}</script>`,
+        `<script src="/x.js"></script>`,
+        `<script is:inline>   </script>`,
+      ].join("\n"),
+    );
+    expect(parsed.clientScripts).toEqual([
+      { content: 'import { t } from "./t";\n  t("one");', startLine: 5 },
+      { content: 't("two");', startLine: 8 },
+    ]);
+  });
+
+  it("emits template code into the generated region, one parenthesised statement each", async () => {
+    const module = buildScriptModule(await parse(`<p>{t("a")}</p>`));
+    expect(module).toContain("// --- astro template (auto-generated) ---");
+    expect(module).toContain('  (t("a")\n  );');
+  });
+
+  it("builds each script as its own module, with its real line and its own scope", async () => {
+    const [script] = (await parse(`<script>\nt("x");\n</script>`)).clientScripts;
+    expect(clientScriptVirtualPath("/p/Card.astro", 0)).toBe("/p/Card.astro.client1.ts");
+    expect(clientScriptVirtualPath("/p/Card.astro", 1)).toBe("/p/Card.astro.client2.ts");
+    const module = buildClientScriptModule(script!);
+    expect(module.split("\n")[4]).toBe('t("x");');
+    expect(module.endsWith("export {}\n")).toBe(true);
   });
 });

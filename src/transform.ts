@@ -1,4 +1,10 @@
-import { buildScriptModule, parseAstroSfc, scriptVirtualPath } from "./parse-astro-sfc";
+import {
+  buildClientScriptModule,
+  buildScriptModule,
+  clientScriptVirtualPath,
+  parseAstroSfc,
+  scriptVirtualPath,
+} from "./parse-astro-sfc";
 import type { CliPluginTransformInput, CliPluginTransformResult } from "./types";
 
 export async function transformAstroSfc(
@@ -23,6 +29,10 @@ export async function transformAstroSfc(
         path: scriptVirtualPath(input.path),
         content: buildScriptModule(parsed),
       },
+      ...parsed.clientScripts.map((script, index) => ({
+        path: clientScriptVirtualPath(input.path, index),
+        content: buildClientScriptModule(script),
+      })),
     ],
   };
 }

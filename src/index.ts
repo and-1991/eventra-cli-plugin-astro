@@ -22,7 +22,13 @@ export function createCliPluginAstro(): CliPluginAstro {
 export default createCliPluginAstro();
 
 export { transformAstroSfc } from "./transform";
-export { buildScriptModule, parseAstroSfc, scriptVirtualPath } from "./parse-astro-sfc";
+export {
+  buildClientScriptModule,
+  buildScriptModule,
+  clientScriptVirtualPath,
+  parseAstroSfc,
+  scriptVirtualPath,
+} from "./parse-astro-sfc";
 export type {
   CliPluginAstro,
   CliPluginStaticCalleeSink,
@@ -30,4 +36,4 @@ export type {
   CliPluginTransformResult,
   CliPluginVirtualModule,
 } from "./types";
-export type { ParsedAstroSfc, TemplateEventBinding } from "./parse-astro-sfc";
+export type { ClientScript, ParsedAstroSfc, TemplateEventBinding } from "./parse-astro-sfc";
