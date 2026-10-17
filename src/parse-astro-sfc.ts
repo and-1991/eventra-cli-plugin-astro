@@ -80,9 +80,8 @@ function collectFromAttributes(
       // JSX shorthand `{event}` is sugar for `event={event}` — the compiler
       // leaves `value` empty for this kind, so the expression is the name.
       out.push({ kind: "dynamic", value: attribute.name });
-    } else if (attribute.kind === "quoted" || attribute.kind === "empty") {
-      // `event="literal"` or the boolean-shorthand `event` (empty kind, no
-      // event name to extract).
+    } else if (attribute.kind === "quoted") {
+      // `event="literal"`; the boolean shorthand `event` has kind "empty" and no name to extract.
       const literal = attribute.value.trim();
       if (literal) {
         out.push({ kind: "literal", value: literal });
@@ -131,11 +130,6 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
 
   function visit(node: unknown): void {
     if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const child of node) visit(child);
-      return;
-    }
-
     const record = node as Record<string, unknown>;
     if (record.type === "frontmatter") {
       const raw = record.value as string;
@@ -161,8 +155,8 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
     if (record.type === "expression") {
       const children = record.children as readonly { type: string; value?: string }[] | undefined;
       if (children?.length && children.every((child) => child.type === "text")) {
-        const expression = children.map((child) => child.value).join("").trim();
-        if (expression) templateCode.push(expression);
+        // an empty `{ }` is dropped with the other empty expressions at the end
+        templateCode.push(children.map((child) => child.value).join("").trim());
       }
     }
     if (Array.isArray(record.attributes)) {
