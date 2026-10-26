@@ -96,17 +96,24 @@ The prop does not have to be named `event`. If a component sends one of its prop
 
 ```astro
 ---
-// Button.astro
+// Banner.astro: tracks that it was shown
+import { Eventra } from '@eventra_dev/eventra-sdk';
+const tracker = new Eventra({ apiKey: 'YOUR_KEY' });
 const { analyticsName } = Astro.props;
+tracker.track(analyticsName);
 ---
-<button onclick={`trackEvent("${analyticsName}")`}><slot /></button>
+<aside><slot /></aside>
+```
 
+```astro
 ---
 // Page.astro
-import Button from './Button.astro';
+import Banner from './Banner.astro';
 ---
-<Button analyticsName="checkout.cta">Pay</Button>
+<Banner analyticsName="checkout.banner">Free shipping</Banner>
 ```
+
+The call has to be real code (in the frontmatter, in a `{...}` expression or in a `<script>`): a prop put into a string such as `onclick={`track("${name}")`}` is text, not a call, and is not read.
 
 Works for `const { a, b } = Astro.props`, `const props = Astro.props` and `Astro.props.a` read straight in the template, for default imports of `.astro` files, `prop="text"`, `prop={expr}` and the `{prop}` shorthand, and follows a prop handed on to another component. Props the component never tracks are not events.
 
