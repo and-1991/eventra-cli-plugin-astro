@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm version" src="https://img.shields.io/npm/v/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
-  <img alt="tests passing" src="https://img.shields.io/badge/tests-43%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
+  <img alt="tests passing" src="https://img.shields.io/badge/tests-124%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="coverage" src="https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="node" src="https://img.shields.io/node/v/@eventra_dev/cli-plugin-astro?style=flat-square&color=darkgreen&logo=node.js&logoColor=white">
   <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ready-blue?style=flat-square&logo=typescript&logoColor=white"></a>
@@ -90,6 +90,28 @@ Calls written in template expressions are read: `{track("x")}`, `attr={expr}` (`
 
 Each `<script>` in the template (client-side TypeScript) is read as a module of its own, with its own imports and its real line numbers. A script that holds data (`type="application/ld+json"`, an import map) or has no content is skipped. A quoted `onclick="track('x')"` is text for the browser and is not read.
 
+### Props of a component, whatever they are called
+
+The prop does not have to be named `event`. If a component sends one of its props to a tracking call, every place that uses the component with a value for that prop is an event:
+
+```astro
+---
+// Button.astro
+const { analyticsName } = Astro.props;
+---
+<button onclick={`trackEvent("${analyticsName}")`}><slot /></button>
+
+---
+// Page.astro
+import Button from './Button.astro';
+---
+<Button analyticsName="checkout.cta">Pay</Button>
+```
+
+Works for `const { a, b } = Astro.props`, `const props = Astro.props` and `Astro.props.a` read straight in the template, for default imports of `.astro` files, `prop="text"`, `prop={expr}` and the `{prop}` shorthand, and follows a prop handed on to another component. Props the component never tracks are not events.
+
+Not followed: spreads, boolean attributes, template literals in props, member tags (`<Foo.Bar>`), non-default imports, a frontmatter with an `export` other than a type, and an import after code (those components are scanned as before).
+
 ## Configuration
 
 No plugin-specific config — it activates purely by being listed in `eventra.json`'s `plugins` array (see [Installation](#installation)).
@@ -126,7 +148,7 @@ No dependency on `@eventra_dev/eventra-cli` - the CLI adapts this shape internal
 
 **100% statement/branch/function/line coverage** (v8 provider, `pnpm test:coverage`), enforced via a `coverage.thresholds` block in `vitest.config.ts`.
 
-**43 unit tests** (vitest), covering:
+**124 unit tests** (vitest), covering:
 
 | Area | Covers |
 |---|---|

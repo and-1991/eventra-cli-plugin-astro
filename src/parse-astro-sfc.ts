@@ -1,5 +1,15 @@
 import { parse } from "@astrojs/compiler";
+import {
+  componentCalls,
+  replaceAstroProps,
+  topLevelImports,
+  usesAstroProps,
+  wrapFrontmatter,
+} from "./component";
+import type { TemplateComponentProp, TemplateComponentUsage } from "./component";
 import { firstContentLine, placeBlocks } from "./layout";
+
+export type { TemplateComponentProp, TemplateComponentUsage } from "./component";
 
 /** A single `event="..."` binding found on a tag in the template. */
 export interface TemplateEventBinding {
@@ -29,6 +39,8 @@ export interface ParsedAstroSfc {
   readonly templateCode: readonly string[];
   /** The template's `<script>` elements, each a module of its own. */
   readonly clientScripts: readonly ClientScript[];
+  /** Every component tag in the template with the props written on it, for the ones that turn out to be imported. */
+  readonly componentUsages?: readonly TemplateComponentUsage[];
   readonly errors: readonly string[];
 }
 
@@ -94,6 +106,17 @@ function collectFromAttributes(
   }
 }
 
+/** `track="x"`, `track={expr}` and `{track}` are props; a spread, a boolean attribute and a template literal are not followed. */
+function componentProps(attributes: readonly AstroAttributeNode[]): TemplateComponentProp[] {
+  const props: TemplateComponentProp[] = [];
+  for (const attribute of attributes) {
+    if (attribute.kind === "quoted") props.push({ name: attribute.name, kind: "literal", value: attribute.value });
+    else if (attribute.kind === "expression" && attribute.value.trim()) props.push({ name: attribute.name, kind: "expression", value: attribute.value.trim() });
+    else if (attribute.kind === "shorthand") props.push({ name: attribute.name, kind: "expression", value: attribute.name });
+  }
+  return props;
+}
+
 // a script that is not JavaScript (`application/ld+json`, an importmap) holds data, not calls
 const JS_SCRIPT_TYPES = new Set(["module", "text/javascript", "application/javascript"]);
 
@@ -127,6 +150,7 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
   const templateEvents: TemplateEventBinding[] = [];
   const templateCode: string[] = [];
   const clientScripts: ClientScript[] = [];
+  const componentUsages: TemplateComponentUsage[] = [];
 
   function visit(node: unknown): void {
     if (!node || typeof node !== "object") return;
@@ -159,6 +183,10 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
         templateCode.push(children.map((child) => child.value).join("").trim());
       }
     }
+    if (record.type === "component" && Array.isArray(record.attributes)) {
+      const props = componentProps(record.attributes as AstroAttributeNode[]);
+      if (props.length > 0) componentUsages.push({ tag: record.name as string, props });
+    }
     if (Array.isArray(record.attributes)) {
       collectFromAttributes(record.attributes as AstroAttributeNode[], templateEvents, templateCode);
     }
@@ -169,7 +197,7 @@ export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
 
   visit(result.ast);
 
-  return { script, scriptStartLine, templateEvents, templateCode: templateCode.filter(Boolean), clientScripts, errors };
+  return { script, scriptStartLine, templateEvents, templateCode: templateCode.filter(Boolean), clientScripts, componentUsages, errors };
 }
 
 /** Map `Card.astro` → `Card.astro.ts` (single virtual TS module for the compiler). */
@@ -199,29 +227,48 @@ const TEMPLATE_EVENT_CALLEE = "__eventra_astro_template_event__";
  * any other TS expression; anything that doesn't resolve (e.g. a
  * `.map()` callback parameter) is correctly reported as a dynamic occurrence
  * rather than silently dropped.
+ *
+ * A component that reads `Astro.props` is also exported as a function of them, and every use of it in
+ * another template becomes a call of that function. The prop that reaches a tracking call is then
+ * found by what the component does with it, whatever the prop is called.
  */
-export function buildScriptModule(parsed: ParsedAstroSfc): string {
+export function buildScriptModule(parsed: ParsedAstroSfc, filePath = ""): string {
+  const imports = parsed.script ? topLevelImports(parsed.script) : { bodyStart: 0, components: [] };
+  const readsProps = usesAstroProps([parsed.script ?? "", ...parsed.templateCode].join("\n"));
+  const wrapped = readsProps && imports ? wrapFrontmatter(parsed.script ?? "", imports, filePath) : null;
+  // outside a component function `Astro.props` stays as written, as it always was
+  const rewrite = wrapped ? replaceAstroProps : (code: string): string => code;
+
   // the frontmatter keeps its original line numbers
+  const frontmatter = wrapped?.code ?? parsed.script;
   const parts: string[] = [
-    parsed.script ? placeBlocks([{ content: parsed.script, startLine: parsed.scriptStartLine }]) : "export {}",
+    frontmatter ? placeBlocks([{ content: frontmatter, startLine: parsed.scriptStartLine }]) : "export {}",
   ];
 
-  if (parsed.templateEvents.length > 0 || parsed.templateCode.length > 0) {
-    const lines = [
-      "// --- astro template (auto-generated) ---",
-      `declare function ${TEMPLATE_EVENT_CALLEE}(name: string): void;`,
-      "function __eventraAstroTemplate() {",
+  const usages = componentCalls(parsed.componentUsages ?? [], imports?.components ?? [], rewrite);
+  if (parsed.templateEvents.length > 0 || parsed.templateCode.length > 0 || usages.length > 0) {
+    const marker = "// --- astro template (auto-generated) ---";
+    const declaration = `declare function ${TEMPLATE_EVENT_CALLEE}(name: string): void;`;
+    const body = [
       // template expressions go through the same detection as frontmatter code; the closing paren
       // sits on its own line, so a trailing `// comment` cannot swallow it
-      ...parsed.templateCode.map((expression) => `  (${expression}\n  );`),
+      ...parsed.templateCode.map((expression) => `  (${rewrite(expression)}\n  );`),
+      ...usages,
       ...parsed.templateEvents.map((binding) =>
         binding.kind === "literal"
           ? `  ${TEMPLATE_EVENT_CALLEE}("${escapeString(binding.value)}");`
-          : `  ${TEMPLATE_EVENT_CALLEE}(${binding.value});`,
+          : `  ${TEMPLATE_EVENT_CALLEE}(${rewrite(binding.value)});`,
       ),
-      "}",
     ];
-    parts.push(lines.join("\n"));
+    if (wrapped) {
+      // inside the component function, where its props and frontmatter variables are in scope
+      parts[0] = `${parts[0]}\n${[marker, ...body].join("\n")}\n// --- end template ---\n}\nexport default ${wrapped.name};`;
+      parts.push(declaration);
+    } else {
+      parts.push([marker, declaration, "function __eventraAstroTemplate() {", ...body, "}"].join("\n"));
+    }
+  } else if (wrapped) {
+    parts[0] = `${parts[0]}\n}\nexport default ${wrapped.name};`;
   }
 
   return `${parts.join("\n\n")}\n`;

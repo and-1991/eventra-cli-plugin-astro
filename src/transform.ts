@@ -27,7 +27,7 @@ export async function transformAstroSfc(
     modules: [
       {
         path: scriptVirtualPath(input.path),
-        content: buildScriptModule(parsed),
+        content: buildScriptModule(parsed, input.path),
       },
       ...parsed.clientScripts.map((script, index) => ({
         path: clientScriptVirtualPath(input.path, index),
