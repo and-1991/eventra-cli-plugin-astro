@@ -117,7 +117,15 @@ The call has to be real code (in the frontmatter, in a `{...}` expression or in 
 
 Works for `const { a, b } = Astro.props`, `const props = Astro.props` and `Astro.props.a` read straight in the template, for default imports of `.astro` files, `prop="text"`, `prop={expr}` and the `{prop}` shorthand, and follows a prop handed on to another component. Props the component never tracks are not events.
 
-Not followed: spreads, boolean attributes, template literals in props, member tags (`<Foo.Bar>`), non-default imports, a frontmatter with an `export` other than a type, and an import after code (those components are scanned as before).
+**Not followed** (those components are scanned as before, so nothing is lost, but a prop that only they use is not found):
+
+- `<script define:vars={{ ... }}>`. A `<script>` is read as a module of its own, so a prop that reaches it only through `define:vars` is not followed. Track in the frontmatter or in a `{...}` expression instead.
+- Spreads, boolean attributes and template literals in props.
+- Member tags (`<Foo.Bar>`) and non-default imports.
+- A frontmatter with a value `export` (a type is fine) or an import after other code.
+- A prop put into an attribute string (`onclick={`track("${x}")`}`): that is text, not a call.
+
+A value the CLI cannot resolve to a plain string (a `.map()` variable, a prop of the page itself) is listed under "Dynamic event names" instead of becoming an event. The same list shows the tracking call inside the component itself, one line per component, because what it tracks is whatever each caller passes; the callers that pass a literal are still found.
 
 ## Configuration
 
