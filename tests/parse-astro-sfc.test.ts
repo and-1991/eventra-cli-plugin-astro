@@ -81,10 +81,10 @@ describe("parseAstroSfc", () => {
     expect(parsed.templateEvents).toHaveLength(0);
   });
 
-  it("ignores an unbraced interpolated template-literal event value instead of misreading it as one binding", async () => {
+  it("reads an unbraced interpolated template-literal event value as the template literal it is", async () => {
     const parsed = await parseAstroSfc("<button event=`prefix-${suffix}` />");
 
-    expect(parsed.templateEvents).toHaveLength(0);
+    expect(parsed.templateEvents).toEqual([{ kind: "dynamic", value: "`prefix-${suffix}`" }]);
   });
 
   it("captures the same template literal as a dynamic binding once it's wrapped in braces", async () => {

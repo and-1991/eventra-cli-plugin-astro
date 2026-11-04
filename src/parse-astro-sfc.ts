@@ -1,6 +1,7 @@
 import { parse } from "@astrojs/compiler";
 import {
   componentCalls,
+  defineVars,
   replaceAstroProps,
   topLevelImports,
   usesAstroProps,
@@ -23,6 +24,11 @@ export interface ClientScript {
   readonly content: string;
   /** 1-based line of the script's first character in the .astro file. */
   readonly startLine?: number;
+  /**
+   * The expression of `define:vars={...}`. Such a script is inlined into the page, with those values as
+   * variables of its own, so its code is read where the frontmatter's variables are in scope.
+   */
+  readonly defineVars?: string;
 }
 
 export interface ParsedAstroSfc {
@@ -98,19 +104,25 @@ function collectFromAttributes(
       if (literal) {
         out.push({ kind: "literal", value: literal });
       }
+    } else if (attribute.kind === "template-literal") {
+      // `` event=`a-${b}` ``: text and expressions mixed. The compiler hands back the text between the
+      // backticks, so it is a template literal again here; resolved when every expression resolves, and
+      // reported as dynamic, not dropped, when not
+      const template = attribute.value;
+      if (template.trim()) {
+        out.push({ kind: "dynamic", value: `\`${template}\`` });
+      }
     }
-    // "template-literal" (`` event=`a-${b}` ``) mixes text and expressions —
-    // not a single literal or single expression, so it's unsupported and
-    // silently skipped, same as an interpolated attribute in the Vue/Svelte
-    // plugins.
   }
 }
 
-/** `track="x"`, `track={expr}` and `{track}` are props; a spread, a boolean attribute and a template literal are not followed. */
+/** `track="x"`, `track={expr}`, `{track}` and `{...obj}` are props; a boolean attribute and a template literal are not followed. */
 function componentProps(attributes: readonly AstroAttributeNode[]): TemplateComponentProp[] {
   const props: TemplateComponentProp[] = [];
   for (const attribute of attributes) {
-    if (attribute.kind === "quoted") props.push({ name: attribute.name, kind: "literal", value: attribute.value });
+    // `{...obj}`: the compiler hands the expression back as the attribute's name, with no value
+    if (attribute.kind === "spread" && attribute.name.trim()) props.push({ name: "", kind: "spread", value: attribute.name.trim() });
+    else if (attribute.kind === "quoted") props.push({ name: attribute.name, kind: "literal", value: attribute.value });
     else if (attribute.kind === "expression" && attribute.value.trim()) props.push({ name: attribute.name, kind: "expression", value: attribute.value.trim() });
     else if (attribute.kind === "shorthand") props.push({ name: attribute.name, kind: "expression", value: attribute.name });
   }
@@ -134,7 +146,10 @@ function clientScript(element: Record<string, unknown>): ClientScript | null {
   const start = text.position?.start?.line;
   // `position: true` always sets it; kept defensive so an unexpected AST shape only loses line numbers
   /* v8 ignore next */
-  return { content, startLine: typeof start === "number" ? firstContentLine(text.value, start) : undefined };
+  const startLine = typeof start === "number" ? firstContentLine(text.value, start) : undefined;
+  const defineVars = attributes.find((attribute) => attribute.name === "define:vars" && attribute.kind === "expression")?.value.trim();
+  // a script with imports of its own is a module whatever else it says: Astro does not inline those
+  return defineVars && !/^\s*import\b/m.test(content) ? { content, startLine, defineVars } : { content, startLine };
 }
 
 /** Parse an Astro component via the real `@astrojs/compiler` parser (handles comments, JSX expressions, malformed markup, etc). */
@@ -246,13 +261,15 @@ export function buildScriptModule(parsed: ParsedAstroSfc, filePath = ""): string
   ];
 
   const usages = componentCalls(parsed.componentUsages ?? [], imports?.components ?? [], rewrite);
-  if (parsed.templateEvents.length > 0 || parsed.templateCode.length > 0 || usages.length > 0) {
+  const hasDefineVars = parsed.clientScripts.some((script) => script.defineVars !== undefined);
+  if (parsed.templateEvents.length > 0 || parsed.templateCode.length > 0 || usages.length > 0 || hasDefineVars) {
     const marker = "// --- astro template (auto-generated) ---";
     const declaration = `declare function ${TEMPLATE_EVENT_CALLEE}(name: string): void;`;
     const body = [
       // template expressions go through the same detection as frontmatter code; the closing paren
       // sits on its own line, so a trailing `// comment` cannot swallow it
       ...parsed.templateCode.map((expression) => `  (${rewrite(expression)}\n  );`),
+      ...parsed.clientScripts.flatMap((script, index) => (script.defineVars === undefined ? [] : defineVarsScript(script, index, rewrite))),
       ...usages,
       ...parsed.templateEvents.map((binding) =>
         binding.kind === "literal"
@@ -272,6 +289,23 @@ export function buildScriptModule(parsed: ParsedAstroSfc, filePath = ""): string
   }
 
   return `${parts.join("\n\n")}\n`;
+}
+
+/**
+ * A `<script define:vars={{ a, b: expr }}>` is inlined into the page with `a` and `b` as variables of its
+ * own, set from the frontmatter. It is read here, in the frontmatter's scope: each value is taken once
+ * outside the block, where `a` is the frontmatter's, and inside the block `a` is a constant that reads it.
+ */
+function defineVarsScript(script: ClientScript, index: number, rewrite: (code: string) => string): string[] {
+  const variables = defineVars(script.defineVars!);
+  const holder = (name: string): string => `__eventraVar${index}_${name}`;
+  return [
+    ...variables.map(({ name, value }) => `  const ${holder(name)} = (${rewrite(value)}\n  );`),
+    "  {",
+    ...variables.map(({ name }) => `    const ${name} = ${holder(name)};`),
+    script.content,
+    "  }",
+  ];
 }
 
 function escapeString(value: string): string {

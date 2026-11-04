@@ -17,6 +17,24 @@ describe("transformAstroSfc", () => {
   });
 });
 
+describe("transformAstroSfc define:vars scripts", () => {
+  it("reads a define:vars script in the frontmatter's scope instead of as a module of its own", async () => {
+    const result = await transformAstroSfc({
+      path: "/project/Card.astro",
+      source: `---\nconst eventName = "card.viewed";\n---\n<button>x</button>\n<script define:vars={{ eventName, other: 1 }}>\n  track(eventName);\n</script>\n<script>track("b");</script>`,
+    });
+    // only the plain script is a module of its own, and it is the first one
+    expect(result.modules.map((m) => m.path)).toEqual(["/project/Card.astro.ts", "/project/Card.astro.client1.ts"]);
+    const main = result.modules[0]?.content ?? "";
+    expect(main).toContain("const __eventraVar0_eventName = (eventName\n  );");
+    expect(main).toContain("const __eventraVar0_other = (1\n  );");
+    expect(main).toContain("const eventName = __eventraVar0_eventName;");
+    expect(main).toContain("const other = __eventraVar0_other;");
+    expect(main).toContain("track(eventName);");
+    expect(result.modules[1]?.content).toContain('track("b");');
+  });
+});
+
 describe("transformAstroSfc client scripts", () => {
   it("returns one extra module per <script>", async () => {
     const result = await transformAstroSfc({

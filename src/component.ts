@@ -3,7 +3,8 @@ import path from "node:path";
 /** A prop passed to a child component in the template: `track="x"` (literal), `track={expr}` / `{track}` (expression). */
 export interface TemplateComponentProp {
   readonly name: string;
-  readonly kind: "literal" | "expression";
+  /** `spread`: `{...obj}`, whose properties are props in the place it stands among the others (`name` is empty). */
+  readonly kind: "literal" | "expression" | "spread";
   readonly value: string;
 }
 
@@ -139,10 +140,60 @@ export function componentCalls(usages: readonly TemplateComponentUsage[], compon
   for (const usage of usages) {
     if (!components.includes(usage.tag)) continue;
     const props = usage.props.map((prop) => {
+      if (prop.kind === "spread") return `...(${rewrite(prop.value)}\n)`;
       const key = KEY.test(prop.name) ? prop.name : `"${escapeString(prop.name)}"`;
       return `${key}: ${prop.kind === "literal" ? `"${escapeString(prop.value)}"` : `(${rewrite(prop.value)}\n)`}`;
     });
     calls.push(`  ${usage.tag}({ ${props.join(", ")} });`);
   }
   return calls;
+}
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/** One variable `define:vars` makes available to its script, and the expression it is set from. */
+export interface DefineVar {
+  readonly name: string;
+  readonly value: string;
+}
+
+/**
+ * The variables `define:vars={{ name, other: value }}` makes available to its script: the keys of the object
+ * written there that are plain identifiers, each with its value expression (`name` for a shorthand). A spread,
+ * a computed key or a key that is not an identifier names nothing that can be read, and the text is not an
+ * object literal at all when it is a variable.
+ */
+export function defineVars(expression: string): DefineVar[] {
+  const text = expression.trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) return [];
+  const found = new Map<string, string>();
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 1;
+  let colon = -1;
+  const take = (end: number): void => {
+    const key = text.slice(start, colon === -1 ? end : colon).trim();
+    if (!IDENTIFIER.test(key)) return;
+    const value = colon === -1 ? key : text.slice(colon + 1, end).trim();
+    if (value) found.set(key, value);
+  };
+  for (let index = 1; index < text.length - 1; index++) {
+    const char = text[index];
+    if (quote) {
+      if (char === "\\") index++;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") quote = char;
+    else if ("({[".includes(char)) depth++;
+    else if (")}]".includes(char)) depth--;
+    else if (depth === 0 && char === ":" && colon === -1) colon = index;
+    else if (depth === 0 && char === ",") {
+      take(index);
+      start = index + 1;
+      colon = -1;
+    }
+  }
+  take(text.length - 1);
+  return [...found].map(([name, value]) => ({ name, value }));
 }

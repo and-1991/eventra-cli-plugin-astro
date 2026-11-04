@@ -102,12 +102,17 @@ describe("componentCalls", () => {
 });
 
 describe("parseAstroSfc component usages", () => {
-  it("reads quoted, expression and shorthand props of a component and nothing else", async () => {
+  it("reads quoted, expression, shorthand and spread props of a component and nothing else", async () => {
     const parsed = await parseAstroSfc(`---\nimport B from "./b.astro";\n---\n<div a="1"><B track="x" label={y} {t} flag dyn=\`a\${b}\` {...rest} /><B /><my-el a="1" />{ok && <B track={z} />}</div>`);
     expect(parsed.componentUsages).toEqual([
-      { tag: "B", props: [{ name: "track", kind: "literal", value: "x" }, { name: "label", kind: "expression", value: "y" }, { name: "t", kind: "expression", value: "t" }] },
+      { tag: "B", props: [{ name: "track", kind: "literal", value: "x" }, { name: "label", kind: "expression", value: "y" }, { name: "t", kind: "expression", value: "t" }, { name: "", kind: "spread", value: "rest" }] },
       { tag: "B", props: [{ name: "track", kind: "expression", value: "z" }] },
     ]);
+  });
+
+  it("turns a spread into a spread of the call, in its place, and rewrites Astro.props in it", async () => {
+    const text = await module(`---\nimport B from "./b.astro";\nconst { rest } = Astro.props;\n---\n<B a="1" {...rest} {...Astro.props.more} b={y} />`);
+    expect(text).toContain('B({ a: "1", ...(rest\n), ...(__astroProps.more\n), b: (y\n) });');
   });
 
   it("skips an expression prop with no code in it", async () => {

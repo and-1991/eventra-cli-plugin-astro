@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm version" src="https://img.shields.io/npm/v/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
-  <img alt="tests passing" src="https://img.shields.io/badge/tests-124%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
+  <img alt="tests passing" src="https://img.shields.io/badge/tests-130%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="coverage" src="https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="node" src="https://img.shields.io/node/v/@eventra_dev/cli-plugin-astro?style=flat-square&color=darkgreen&logo=node.js&logoColor=white">
   <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ready-blue?style=flat-square&logo=typescript&logoColor=white"></a>
@@ -119,13 +119,13 @@ Works for `const { a, b } = Astro.props`, `const props = Astro.props` and `Astro
 
 **Not followed** (those components are scanned as before, so nothing is lost, but a prop that only they use is not found):
 
-- `<script define:vars={{ ... }}>`. A `<script>` is read as a module of its own, so a prop that reaches it only through `define:vars` is not followed. Track in the frontmatter or in a `{...}` expression instead.
-- Spreads, boolean attributes and template literals in props.
+- A `<script define:vars={vars}>` whose value is not an object written out in the tag, or one that has imports of its own (it is then a module, as any other `<script>`). A `define:vars={{ a, b: expr }}` script without imports is read in the frontmatter's scope, so `a` and `b` resolve to what the frontmatter sets them to.
+- Boolean attributes and template literals in props (a template literal on `event` itself, `` event=`a-${b}` ``, is read).
 - Member tags (`<Foo.Bar>`) and non-default imports.
 - A frontmatter with a value `export` (a type is fine) or an import after other code.
 - A prop put into an attribute string (`onclick={`track("${x}")`}`): that is text, not a call.
 
-A value the CLI cannot resolve to a plain string (a `.map()` variable, a prop of the page itself) is listed under "Dynamic event names" instead of becoming an event. The same list shows the tracking call inside the component itself, one line per component, because what it tracks is whatever each caller passes; the callers that pass a literal are still found.
+A value the CLI cannot resolve to a plain string (a `.map()` variable, a prop of the page itself) is listed under "Dynamic event names" instead of becoming an event, with the reason (`env`, `variable`, `template`, `call`, `expression`). The tracking call inside the component itself is listed apart, under "Inside a wrapper", because what it tracks is whatever each caller passes; the callers that pass a literal are still found.
 
 ## Configuration
 
@@ -163,7 +163,7 @@ No dependency on `@eventra_dev/eventra-cli` - the CLI adapts this shape internal
 
 **100% statement/branch/function/line coverage** (v8 provider, `pnpm test:coverage`), enforced via a `coverage.thresholds` block in `vitest.config.ts`.
 
-**124 unit tests** (vitest), covering:
+**130 unit tests** (vitest), covering:
 
 | Area | Covers |
 |---|---|

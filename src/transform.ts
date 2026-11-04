@@ -29,7 +29,7 @@ export async function transformAstroSfc(
         path: scriptVirtualPath(input.path),
         content: buildScriptModule(parsed, input.path),
       },
-      ...parsed.clientScripts.map((script, index) => ({
+      ...parsed.clientScripts.filter((script) => script.defineVars === undefined).map((script, index) => ({
         path: clientScriptVirtualPath(input.path, index),
         content: buildClientScriptModule(script),
       })),

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { defineVars } from "../src/component";
+
 import {
   buildClientScriptModule,
   buildScriptModule,
@@ -31,8 +33,12 @@ describe("event attributes", () => {
     expect(await eventsOf(`<a {event}>x</a>`)).toEqual([{ kind: "dynamic", value: "event" }]);
   });
 
-  it("skips a template-literal value, which is neither one literal nor one expression", async () => {
-    expect(await eventsOf("<a event=`a-${b}`>x</a>")).toEqual([]);
+  it("reads a template-literal value as the template literal it is", async () => {
+    expect(await eventsOf("<a event=`a-${b}`>x</a>")).toEqual([{ kind: "dynamic", value: "`a-${b}`" }]);
+  });
+
+  it("skips an empty template-literal value", async () => {
+    expect(await eventsOf("<a event=``>x</a>")).toEqual([]);
   });
 
   it("does not take other attributes for an event", async () => {
@@ -117,10 +123,44 @@ describe("client scripts", () => {
     expect(await scriptsOf(`<script></script><script>   </script>`)).toEqual([]);
   });
 
+  it("keeps the define:vars expression of a script, and only of one without imports of its own", async () => {
+    expect(await scriptsOf(`<script define:vars={{ name, other: b }}>track(name);</script>`)).toEqual([
+      { content: "track(name);", startLine: 1, defineVars: "{ name, other: b }" },
+    ]);
+    expect(await scriptsOf(`<script define:vars={{ a }}>\nimport x from "y";\nx(a);\n</script>`)).toEqual([
+      { content: 'import x from "y";\nx(a);', startLine: 2 },
+    ]);
+  });
+
   it("does not look inside a script for template code or events", async () => {
     const parsed = await parseAstroSfc(`<script>const a = {b: 1}; "<a event='x'>"</script>`);
     expect(parsed.templateEvents).toEqual([]);
     expect(parsed.templateCode).toEqual([]);
+  });
+});
+
+describe("defineVars", () => {
+  it("reads the plain-identifier keys of an object with their values, whatever the values hold", () => {
+    expect(defineVars("{ name, other: b, 'quoted': 1, \"d\": 2, fn: (a, b) => ({ x: 1 }), t: `a,${b}:c` , ...rest, [k]: 1, last }")).toEqual([
+      { name: "name", value: "name" },
+      { name: "other", value: "b" },
+      { name: "fn", value: "(a, b) => ({ x: 1 })" },
+      { name: "t", value: "`a,${b}:c`" },
+      { name: "last", value: "last" },
+    ]);
+    expect(defineVars("{ a, a: 2 }")).toEqual([{ name: "a", value: "2" }]);
+    expect(defineVars("{}")).toEqual([]);
+    expect(defineVars("{ a: 'x\\'y, z', b }")).toEqual([
+      { name: "a", value: "'x\\'y, z'" },
+      { name: "b", value: "b" },
+    ]);
+  });
+
+  it("drops a key with no value, and reads nothing from an expression that is not an object literal", () => {
+    expect(defineVars("{ a: }")).toEqual([]);
+    expect(defineVars("vars")).toEqual([]);
+    expect(defineVars("getVars()")).toEqual([]);
+    expect(defineVars("")).toEqual([]);
   });
 });
 
