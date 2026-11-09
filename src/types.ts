@@ -23,6 +23,8 @@ export interface CliPluginStaticCalleeSink {
 
 export interface CliPluginTransformResult {
   readonly modules: readonly CliPluginVirtualModule[];
+  /** Why the file was read only in part: the host CLI lists it and counts the scan as not clean. */
+  readonly partial?: readonly string[];
 }
 
 /** Contract for `@eventra_dev/cli-plugin-astro` and compatible CLI plugins. */

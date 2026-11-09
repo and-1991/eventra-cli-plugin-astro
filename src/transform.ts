@@ -23,7 +23,13 @@ export async function transformAstroSfc(
     );
   }
 
+  // not an error: the frontmatter and scripts are still scanned, and the host CLI lists what is missing
+  const partial = parsed.templateSkipped
+    ? [`template events were not scanned - ${parsed.templateSkipped} (${parsed.scriptsSkipped ? "only the frontmatter was" : "the frontmatter and <script> blocks were"})`]
+    : [];
+
   return {
+    ...(partial.length > 0 ? { partial } : {}),
     modules: [
       {
         path: scriptVirtualPath(input.path),

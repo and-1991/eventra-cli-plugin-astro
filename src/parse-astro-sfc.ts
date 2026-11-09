@@ -1,4 +1,4 @@
-import { parse } from "@astrojs/compiler";
+import { parse, teardown } from "@astrojs/compiler";
 import {
   componentCalls,
   defineVars,
@@ -9,6 +9,7 @@ import {
 } from "./component";
 import type { TemplateComponentProp, TemplateComponentUsage } from "./component";
 import { firstContentLine, placeBlocks } from "./layout";
+import { templateLimitReason, withoutTemplate } from "./complexity";
 
 export type { TemplateComponentProp, TemplateComponentUsage } from "./component";
 
@@ -32,6 +33,13 @@ export interface ClientScript {
 }
 
 export interface ParsedAstroSfc {
+  /**
+   * Set when the template could not be analyzed (too large for the Astro compiler, or the compiler
+   * failed on it). The frontmatter and the `<script>` elements were still read; template events are missing.
+   */
+  readonly templateSkipped?: string;
+  /** Set with `templateSkipped` when the `<script>` blocks were left out too (only the frontmatter was read). */
+  readonly scriptsSkipped?: boolean;
   /** Raw frontmatter (`--- ... ---`) content, or `null` when the file has none. */
   readonly script: string | null;
   /** 1-based line of the frontmatter's first character in the .astro file. */
@@ -154,7 +162,55 @@ function clientScript(element: Record<string, unknown>): ClientScript | null {
 
 /** Parse an Astro component via the real `@astrojs/compiler` parser (handles comments, JSX expressions, malformed markup, etc). */
 export async function parseAstroSfc(source: string): Promise<ParsedAstroSfc> {
-  const result = await parse(source, { position: true });
+  const tooLarge = templateLimitReason(source);
+  if (tooLarge) return parseWithoutTemplate(source, tooLarge);
+
+  let result: Awaited<ReturnType<typeof parse>>;
+  try {
+    result = await compilerParse(source);
+  } catch (error) {
+    // the compiler crashed (it resets itself for the next call); keep what the frontmatter and scripts hold
+    const message = error instanceof Error ? error.message : String(error);
+    return parseWithoutTemplate(source, `the Astro compiler failed (${message.split("\n")[0]})`, error);
+  }
+  return readTree(result);
+}
+
+// The compiler is one WebAssembly instance. When it dies, every call running at that moment dies
+// with it, so calls go through one at a time and a crash costs only the file that caused it.
+let compilerQueue: Promise<unknown> = Promise.resolve();
+
+function compilerParse(source: string): Promise<Awaited<ReturnType<typeof parse>>> {
+  const run = compilerQueue
+    .then(() => parse(source, { position: true }))
+    .catch((error: unknown) => {
+      // A crashed Go runtime hands back nothing instead of throwing, so the compiler does not notice it is
+      // dead and the next call would fail with "Go program has already exited". Start it afresh.
+      teardown();
+      throw error;
+    });
+  compilerQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function parseWithoutTemplate(source: string, reason: string, original?: unknown): Promise<ParsedAstroSfc> {
+  // the scripts are kept only when they are small enough for the compiler themselves (6000 of them are not)
+  let reduced = withoutTemplate(source);
+  let scriptsSkipped = false;
+  if (templateLimitReason(reduced) !== null) {
+    reduced = withoutTemplate(source, false);
+    scriptsSkipped = true;
+  }
+  let result: Awaited<ReturnType<typeof parse>>;
+  try {
+    result = await compilerParse(reduced);
+  } catch {
+    throw original instanceof Error ? original : new Error(`Astro component could not be parsed: ${reason}`);
+  }
+  return { ...readTree(result), templateSkipped: reason, ...(scriptsSkipped ? { scriptsSkipped } : {}) };
+}
+
+function readTree(result: Awaited<ReturnType<typeof parse>>): ParsedAstroSfc {
 
   const errors = result.diagnostics
     .filter((diagnostic) => diagnostic.severity === DIAGNOSTIC_SEVERITY_ERROR)
