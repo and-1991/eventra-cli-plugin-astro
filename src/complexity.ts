@@ -28,6 +28,13 @@ const VOID_ELEMENTS = new Set([
 // `<li>a<li>b` becomes two NESTED elements (600 unclosed `<li>` parse to a tree 602 levels deep, measured). So an
 // unclosed element is counted as nesting, here as in the compiler.
 
+/**
+ * Most attributes one tag may have. The compiler's cost grows with the square of them: 4000 bare attributes took
+ * 2.5 s and 1.4 GB, 8000 ran out of memory, and a run of unclosed `<script x ` (each one read as attributes of the
+ * first tag) did the same with half as many. 1000 parse in well under a second.
+ */
+export const MAX_ATTRIBUTES = 1000;
+
 /** Most elements one page may hold: 27,000 spans in three levels took 11 s and 4.4 GB, 7,200 nodes about 2 s. */
 export const MAX_ELEMENTS = 8000;
 
@@ -36,6 +43,8 @@ export interface TemplateShape {
   readonly maxDepth: number;
   readonly maxCost: number;
   readonly elements: number;
+  /** The most attributes (words between a tag's name and its `>`) of any one tag. */
+  readonly maxAttributes: number;
   /** A tag that is never closed (`<div class="a`): the compiler's handling of that is not predictable. */
   readonly unterminated: boolean;
 }
@@ -58,6 +67,7 @@ export function measureTemplate(source: string): TemplateShape {
   let maxDepth = 0;
   let maxCost = 0;
   let elements = 0;
+  let maxAttributes = 0;
   let unterminated = false;
   const n = source.length;
   const closers = new Map<string, RegExp>();
@@ -108,8 +118,16 @@ export function measureTemplate(source: string): TemplateShape {
     let j = nameStart + match[0].length;
     let quote = "";
     let braces = 0;
+    let attributes = 0;
+    let inWord = false;
     for (; j < n; j++) {
       const c = source[j];
+      // a word starts after white space, outside quotes and braces (a quoted value or an {expression} is part of it)
+      if (!quote && braces === 0) {
+        const space = c === " " || c === "\n" || c === "\t" || c === "\r";
+        if (!space && !inWord && c !== ">") attributes++;
+        inWord = !space;
+      }
       if (quote) {
         if (c === quote) quote = "";
       } else if (braces > 0) {
@@ -120,6 +138,7 @@ export function measureTemplate(source: string): TemplateShape {
       else if (c === "{") braces++;
       else if (c === ">") break;
     }
+    if (attributes > maxAttributes) maxAttributes = attributes;
     if (j >= n) {
       unterminated = true;
       break;
@@ -159,17 +178,20 @@ export function measureTemplate(source: string): TemplateShape {
   while (counts.length > 1) close(n);
   maxCost += Math.max(1, counts[0]) * Math.max(0, n - contentStarts[0]);
 
-  return { maxSiblings, maxDepth, maxCost, elements, unterminated };
+  return { maxSiblings, maxDepth, maxCost, elements, maxAttributes, unterminated };
 }
 
 /** The reason this template is too large for the compiler, or `null` when it is safe to parse. */
 export function templateLimitReason(source: string): string | null {
-  const { maxSiblings, maxDepth, maxCost, elements, unterminated } = measureTemplate(source);
+  const { maxSiblings, maxDepth, maxCost, elements, maxAttributes, unterminated } = measureTemplate(source);
   if (maxSiblings > MAX_SIBLINGS) {
     return `a parent element holds about ${maxSiblings} children (limit ${MAX_SIBLINGS})`;
   }
   if (maxDepth > MAX_DEPTH) {
     return `the markup is nested about ${maxDepth} levels deep (limit ${MAX_DEPTH})`;
+  }
+  if (maxAttributes > MAX_ATTRIBUTES) {
+    return `a tag has about ${maxAttributes} attributes (limit ${MAX_ATTRIBUTES})`;
   }
   if (elements > MAX_ELEMENTS) {
     return `the page has about ${elements} elements (limit ${MAX_ELEMENTS})`;
@@ -199,10 +221,22 @@ export function withoutTemplate(source: string, keepScripts = true): string {
       keep.push([0, from]);
     }
   }
-  const scripts = /<script\b[^>]*>[\s\S]*?<\/script\s*>/gi;
-  scripts.lastIndex = from;
-  for (let m = keepScripts ? scripts.exec(source) : null; m; m = scripts.exec(source)) {
-    keep.push([m.index, m.index + m[0].length]);
+  // Found step by step, not with one lazy regex: `<script\b[^>]*>[\s\S]*?<\/script\s*>` scans to the end of the
+  // file from every `<script` that is never closed, which is quadratic (40k of them took 4 s). Once there is no `>`
+  // or no `</script` left after one, there is none after any later one either, so the search stops there.
+  if (keepScripts) {
+    const open = /<script\b/gi;
+    const close = /<\/script\s*>/gi;
+    open.lastIndex = from;
+    for (let m = open.exec(source); m; m = open.exec(source)) {
+      const tagEnd = source.indexOf(">", m.index);
+      if (tagEnd === -1) break;
+      close.lastIndex = tagEnd + 1;
+      const end = close.exec(source);
+      if (!end) break;
+      keep.push([m.index, end.index + end[0].length]);
+      open.lastIndex = end.index + end[0].length;
+    }
   }
 
   let out = "";

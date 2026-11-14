@@ -249,4 +249,8 @@ describe("componentCalls: escapes", () => {
   it("escapes a backslash and a quote in a literal, in that order", () => {
     expect(componentCalls([{ tag: "B", props: [{ name: "a", kind: "literal", value: 'x\\y"z' }] }], ["B"], (c) => c)).toEqual(['  B({ a: "x\\\\y\\"z" });']);
   });
+
+  it("escapes a line break in a literal", () => {
+    expect(componentCalls([{ tag: "B", props: [{ name: "a", kind: "literal", value: "x\ny" }] }], ["B"], (c) => c)).toEqual(['  B({ a: "x\\ny" });']);
+  });
 });

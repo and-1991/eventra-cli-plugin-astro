@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm version" src="https://img.shields.io/npm/v/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
   <a href="https://www.npmjs.com/package/@eventra_dev/cli-plugin-astro"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@eventra_dev/cli-plugin-astro.svg?style=flat-square&color=blue"></a>
-  <img alt="tests passing" src="https://img.shields.io/badge/tests-163%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
+  <img alt="tests passing" src="https://img.shields.io/badge/tests-170%20passing-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="coverage" src="https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square&logo=vitest&logoColor=white">
   <img alt="node" src="https://img.shields.io/node/v/@eventra_dev/cli-plugin-astro?style=flat-square&color=darkgreen&logo=node.js&logoColor=white">
   <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-ready-blue?style=flat-square&logo=typescript&logoColor=white"></a>
@@ -20,7 +20,7 @@ Official [**Eventra CLI**](https://www.npmjs.com/package/@eventra_dev/eventra-cl
 
 ## Overview
 
-The CLI core is framework-agnostic and only walks `.ts`/`.tsx`/`.js`/`.jsx`. This plugin teaches it `.astro`: it parses each component with the real Astro compiler ([`@astrojs/compiler`](https://www.npmjs.com/package/@astrojs/compiler)) — not a regex — and hands the CLI a single virtual TypeScript module per file, so every existing detection rule (direct SDK calls, function wrappers, cross-file propagation, dynamic-name reporting) applies to Astro code without any Astro-specific case in the core engine.
+The CLI core is framework-agnostic and only walks TypeScript and JavaScript files (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`). This plugin teaches it `.astro`: it parses each component with the real Astro compiler ([`@astrojs/compiler`](https://www.npmjs.com/package/@astrojs/compiler)) - not a regex - and hands the CLI a single virtual TypeScript module per file, so every existing detection rule (direct SDK calls, function wrappers, cross-file propagation, dynamic-name reporting) applies to Astro code without any Astro-specific case in the core engine.
 
 ---
 
@@ -129,7 +129,7 @@ A value the CLI cannot resolve to a plain string (a `.map()` variable, a prop of
 
 ### Very large templates
 
-The Astro compiler slows down sharply, and finally runs out of memory, on a template with about 700 or more siblings under one element (a long generated list) or with markup nested hundreds of levels deep. The plugin measures the template first. Past 700 siblings under one parent, 1000 levels of nesting or 8000 elements, it does not hand the template to the compiler: it reads the frontmatter and the `<script>` tags, leaves the template out, and prints a warning naming the file. Events written in that template are not in the scan; split the page into components to get them back. The plugin tells the CLI the file was read only in part: `sync` and `check` list it, count the scan as not clean, keep the events already known, and `--strict` fails. A file that crashes the compiler for any other reason is treated the same way, and other files are not affected. The size is judged by the number of children under one parent times the markup inside it (a table of 500 rows by 30 cells is too large, 500 rows by 5 cells is not), by nesting, and by a tag that is never closed (the compiler's answer to broken markup is not predictable). If the scripts alone are too much for the compiler too, only the frontmatter is read. An end tag left out (`<li>a<li>b`) is nested by the compiler, so it counts as nesting. A compiler crash is contained: the next file is read as usual.
+The Astro compiler slows down sharply, and finally runs out of memory, on a template with about 700 or more siblings under one element (a long generated list) or with markup nested hundreds of levels deep. The plugin measures the template first. Past 700 siblings under one parent, 1000 levels of nesting, 8000 elements or a tag with more than 1000 attributes (a run of `<script x ` that is never closed is read as attributes of one tag, and the compiler's cost grows with their square), it does not hand the template to the compiler: it reads the frontmatter and the `<script>` tags, leaves the template out, and prints a warning naming the file. Events written in that template are not in the scan; split the page into components to get them back. The plugin tells the CLI the file was read only in part: `sync` and `check` list it, count the scan as not clean, keep the events already known, and `--strict` fails. A file that crashes the compiler for any other reason is treated the same way, and other files are not affected. The size is judged by the number of children under one parent times the markup inside it (a table of 500 rows by 30 cells is too large, 500 rows by 5 cells is not), by nesting, and by a tag that is never closed (the compiler's answer to broken markup is not predictable). If the scripts alone are too much for the compiler too, only the frontmatter is read. An end tag left out (`<li>a<li>b`) is nested by the compiler, so it counts as nesting. A compiler crash is contained: the next file is read as usual.
 
 ## Configuration
 
@@ -148,6 +148,7 @@ export interface CliPluginAstro {
   match(path: string): boolean;
   transform(input: { path: string; source: string }): Promise<{
     modules: Array<{ path: string; content: string }>;
+    partial?: string[];  // the template was too large for the compiler and was left out
   }>;
 }
 ```
@@ -174,7 +175,7 @@ No dependency on `@eventra_dev/eventra-cli` - the CLI adapts this shape internal
 | Component parsing | Frontmatter extraction, comment safety, compiler-diagnostic reporting |
 | Template — literal | Nested elements, JSX expressions (`&&`, ternary, `.map()`) |
 | Template — dynamic | Raw expression passthrough, `{event}` shorthand, resolution through the frontmatter scope |
-| Edge cases | Empty `event=""`, boolean-shorthand `event`, empty `event={}`, unbraced template-literal `` event=`a-${b}` `` (unsupported — silently ignored, same as any other interpolated/mixed value; wrap it in braces, `` event={`a-${b}`} ``, to make it a supported dynamic expression) |
+| Edge cases | Empty `event=""`, boolean-shorthand `event`, empty `event={}`, unbraced template-literal `` event=`a-${b}` `` (read as the template literal it is, the same as `` event={`a-${b}`} ``) |
 | Astro globals | `Astro.props` destructuring passes through without special-casing |
 | Virtual module output | Single combined `.astro.ts`, export stub when frontmatter/template are empty |
 | Plugin contract | `match()`, `includeGlobs`, `staticSinks`, `transform()` |

@@ -129,7 +129,8 @@ export function wrapFrontmatter(code: string, imports: Imports, filePath: string
 
 const KEY = /^[A-Za-z_$][\w$]*$/;
 
-const escapeString = (value: string): string => value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+// JSON escaping: a raw line break in a literal prop would otherwise end the generated string early
+const escapeString = (value: string): string => JSON.stringify(value).slice(1, -1);
 
 /**
  * A use of an imported component in the template is a call of that component with its props object:

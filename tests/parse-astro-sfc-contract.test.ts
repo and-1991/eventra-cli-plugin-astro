@@ -250,6 +250,14 @@ describe("modules: exact text", () => {
     expect(line(String.raw`a\"b`)).toBe(`  ${CALLEE}("a\\\\\\"b");`);
   });
 
+  it("escapes a line break, so a name with one is not cut at it", () => {
+    const line = (value: string) =>
+      buildScriptModule(parsed({ templateEvents: [{ kind: "literal", value }] }))
+        .split("\n")
+        .find((l) => l.startsWith(`  ${CALLEE}(`));
+    expect(line("multi\nline\r\tend")).toBe(`  ${CALLEE}("multi\\nline\\r\\tend");`);
+  });
+
   it("builds a client script as its own module, on its original line, ending in an export", () => {
     expect(buildClientScriptModule({ content: "track(1);", startLine: 4 })).toBe("\n\n\ntrack(1);\nexport {}\n");
     expect(buildClientScriptModule({ content: "track(1);" })).toBe("track(1);\nexport {}\n");

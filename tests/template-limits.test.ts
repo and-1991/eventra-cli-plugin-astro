@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MAX_COST, MAX_DEPTH, MAX_ELEMENTS, MAX_SIBLINGS, measureTemplate, templateLimitReason, withoutTemplate } from "../src/complexity";
+import { MAX_ATTRIBUTES, MAX_COST, MAX_DEPTH, MAX_ELEMENTS, MAX_SIBLINGS, measureTemplate, templateLimitReason, withoutTemplate } from "../src/complexity";
 import { buildScriptModule, parseAstroSfc } from "../src/parse-astro-sfc";
 import { transformAstroSfc } from "../src/transform";
 
@@ -200,6 +200,45 @@ describe("what the siblings limit alone does not see", () => {
     const started = Date.now();
     measureTemplate(source);
     expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it("counts the attributes of a tag, not words in quotes or expressions", () => {
+    expect(measureTemplate('<div a b="x y z" c={1 + 2} d>text with many words</div>').maxAttributes).toBe(4);
+    expect(measureTemplate("<div\n  a\n  b\n>").maxAttributes).toBe(2);
+    expect(measureTemplate("<p>x</p>").maxAttributes).toBe(0);
+  });
+
+  it("a tag with too many attributes is refused (PL5: the compiler ran out of 2 GB on unclosed <script x)", () => {
+    const attrs = (n: number) => `<div ${Array.from({ length: n }, (_, i) => `a${i}`).join(" ")}></div>`;
+    expect(templateLimitReason(attrs(MAX_ATTRIBUTES))).toBeNull();
+    expect(templateLimitReason(attrs(MAX_ATTRIBUTES + 1))).toMatch(/attributes/);
+    expect(templateLimitReason("<div>\n" + "<script x ".repeat(20_000) + ">")).toMatch(/attributes/);
+    expect(templateLimitReason("<div>\n" + "<script x \n".repeat(20_000) + "</div>")).toMatch(/attributes/);
+  });
+
+  it("a page of unclosed <script x is read without its template, quickly and without the compiler blowing up", async () => {
+    const started = Date.now();
+    const parsed = await parseAstroSfc(`${FRONT}<div>\n${"<script x ".repeat(20_000)}>`);
+    expect(parsed.templateSkipped).toMatch(/attributes/);
+    expect(parsed.script).toContain("page.viewed");
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("withoutTemplate finds scripts in linear time when many are never closed", () => {
+    const started = Date.now();
+    withoutTemplate("<script x>".repeat(80_000));
+    withoutTemplate("<script x ".repeat(80_000));
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it("withoutTemplate keeps every closed script and stops at one that is not closed", () => {
+    const source = `${FRONT}<script>a()</script>\n<p>x</p>\n<SCRIPT type="m">b()</script >\n<script>c()`;
+    const out = withoutTemplate(source);
+    expect(out).toContain("<script>a()</script>");
+    expect(out).toContain('<SCRIPT type="m">b()</script >');
+    expect(out).not.toContain("c()");
+    expect(out).not.toContain("<p>");
+    expect(out.split("\n").length).toBe(source.split("\n").length);
   });
 
   it("withoutTemplate can drop the scripts too", () => {

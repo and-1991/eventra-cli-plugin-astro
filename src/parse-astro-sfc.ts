@@ -364,6 +364,9 @@ function defineVarsScript(script: ClientScript, index: number, rewrite: (code: s
   ];
 }
 
+// The value goes between double quotes in generated TypeScript. JSON escaping covers the quote and the backslash and
+// also line breaks and other control characters: a raw newline used to end the string early, so the name was
+// recorded cut at the newline and nothing reported it.
 function escapeString(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return JSON.stringify(value).slice(1, -1);
 }
