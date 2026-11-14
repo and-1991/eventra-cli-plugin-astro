@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MAX_ATTRIBUTES, MAX_COST, MAX_DEPTH, MAX_ELEMENTS, MAX_SIBLINGS, measureTemplate, templateLimitReason, withoutTemplate } from "../src/complexity";
+import { MAX_ATTRIBUTES, MAX_DEPTH, MAX_ELEMENTS, MAX_SIBLINGS, measureTemplate, templateLimitReason, withoutTemplate } from "../src/complexity";
 import { buildScriptModule, parseAstroSfc } from "../src/parse-astro-sfc";
 import { transformAstroSfc } from "../src/transform";
 
